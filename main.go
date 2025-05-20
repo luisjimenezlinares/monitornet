@@ -17,6 +17,11 @@ import (
 	psnet "github.com/shirou/gopsutil/v3/net"
 )
 
+const (
+	WaitSeconds = 10
+	// IntervalSeconds = 10
+)
+
 var (
 	iaDomains = []string{
 		"api.openai.com", "chat.openai.com", "claude.ai",
@@ -119,7 +124,7 @@ func main() {
 	logPath := filepath.Join(storageDir, "netlog.txt")
 	jsonPath := filepath.Join(storageDir, "netlog.json")
 
-	interval := 10 * time.Second
+	interval := WaitSeconds * time.Second
 	if val := os.Getenv("NET_MONITOR_INTERVAL"); val != "" {
 		if i, err := strconv.Atoi(val); err == nil && i > 0 {
 			interval = time.Duration(i) * time.Second
