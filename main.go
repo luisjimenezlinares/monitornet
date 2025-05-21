@@ -1,16 +1,19 @@
 package main
 
 import (
+	"bufio"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,14 +26,31 @@ const (
 )
 
 var (
-	iaDomains = []string{
-		"api.openai.com", "chat.openai.com", "claude.ai",
-		"api.anthropic.com", "gemini.google.com", "api.mistral.ai",
-		"copilot-proxy.githubusercontent.com", "github-copilot.com", "vscode-auth.github.com",
-	}
+	iaDomains = []string{}
 	whitelist = map[string]bool{}
 	blacklist = map[string]bool{}
 )
+
+func fetchDomainsFromGitHub(rawURL string) ([]string, error) {
+	resp, err := http.Get(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var domains []string
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" && !strings.HasPrefix(line, "#") {
+			domains = append(domains, line)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return domains, nil
+}
 
 func resolveIADomainIPs(domains []string) map[string]string {
 	ipMap := make(map[string]string)
@@ -138,6 +158,10 @@ func main() {
 	}
 
 	logMessage(logPath, jsonPath, "Monitor de red iniciado.")
+	iaDomains, err := fetchDomainsFromGitHub("https://github.com/luisjimenezlinares/blacklist/blob/main/ia_monitor_domains.txt")
+	if err != nil {
+		log.Fatalf("No se pudieron obtener los dominios: %v", err)
+	}
 	iaIPs := resolveIADomainIPs(iaDomains)
 	logMessage(logPath, jsonPath, fmt.Sprintf("Resueltas %d IPs de IA.", len(iaIPs)))
 
