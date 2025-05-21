@@ -2,7 +2,8 @@ package main
 
 import (
 	"bufio"
-	"crypto/md5"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -21,8 +22,10 @@ import (
 )
 
 const (
+	clave       = "clave_super_secreta"
 	WaitSeconds = 10
 	// IntervalSeconds = 10
+	blacklistFile = "https://raw.githubusercontent.com/luisjimenezlinares/blacklist/refs/heads/main/ia_monitor_domains.txt"
 )
 
 var (
@@ -43,6 +46,7 @@ func fetchDomainsFromGitHub(rawURL string) ([]string, error) {
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" && !strings.HasPrefix(line, "#") {
+
 			domains = append(domains, line)
 		}
 	}
@@ -57,7 +61,7 @@ func resolveIADomainIPs(domains []string) map[string]string {
 	for _, domain := range domains {
 		ips, err := net.LookupIP(domain)
 		if err != nil {
-			log.Printf("Error resolviendo %s: %v", domain, err)
+			log.Printf("Error resolviendo %s", domain)
 			continue
 		}
 		for _, ip := range ips {
@@ -87,20 +91,6 @@ func logMessage(path string, jsonPath string, msg string) {
 		defer jf.Close()
 		jf.WriteString(string(jsonData) + "\n")
 	}
-}
-
-func calculateMD5(filePath string) string {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	h := md5.New()
-	_, err = h.Write([]byte(fmt.Sprintf("%v", time.Now().UnixNano())))
-	if err != nil {
-		return ""
-	}
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 func monitorConnections(iaIPSet map[string]string, logPath, jsonPath string, interval time.Duration, done chan struct{}) {
@@ -140,6 +130,41 @@ func monitorConnections(iaIPSet map[string]string, logPath, jsonPath string, int
 	}
 }
 
+// firmarFicheroConHMAC firma un archivo usando HMAC-SHA256 y guarda el resultado en un nuevo fichero.
+func firmarFicheroConHMAC(ficheroEntrada, ficheroSalida string, clavestr string) error {
+	// Convertir la clave a un slice de bytes
+	clave := []byte(clavestr)
+	// Leer contenido original
+	original, err := os.ReadFile(ficheroEntrada)
+	if err != nil {
+		return fmt.Errorf("error leyendo %s: %w", ficheroEntrada, err)
+	}
+
+	// Calcular HMAC-SHA256
+	h := hmac.New(sha256.New, clave)
+	h.Write(original)
+	hash := h.Sum(nil)
+	hashHex := hex.EncodeToString(hash)
+
+	// Crear fichero de salida con contenido + separador + HMAC
+	f, err := os.Create(ficheroSalida)
+	if err != nil {
+		return fmt.Errorf("error creando %s: %w", ficheroSalida, err)
+	}
+	defer f.Close()
+
+	_, err = f.Write(original)
+	if err != nil {
+		return fmt.Errorf("error escribiendo contenido: %w", err)
+	}
+	_, err = f.WriteString("\n---HMAC---\n" + hashHex)
+	if err != nil {
+		return fmt.Errorf("error escribiendo HMAC: %w", err)
+	}
+
+	return nil
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		log.Fatal("Debe proporcionarse la ruta del log como argumento.")
@@ -158,7 +183,7 @@ func main() {
 	}
 
 	logMessage(logPath, jsonPath, "Monitor de red iniciado.")
-	iaDomains, err := fetchDomainsFromGitHub("https://github.com/luisjimenezlinares/blacklist/blob/main/ia_monitor_domains.txt")
+	iaDomains, err := fetchDomainsFromGitHub(blacklistFile)
 	if err != nil {
 		log.Fatalf("No se pudieron obtener los dominios: %v", err)
 	}
@@ -173,9 +198,22 @@ func main() {
 	<-c
 	close(done)
 
-	hash := calculateMD5(logPath)
-	logMessage(logPath, jsonPath, fmt.Sprintf("Monitor detenido. MD5 del log: %s", hash))
-	fmt.Printf("\n\u2714 Monitor detenido. MD5 del log: %s\n", hash)
+	err = firmarFicheroConHMAC(logPath, "firma.txt", clave)
+	if err != nil {
+		fmt.Println("❌ Error:", err)
+	}
+	fmt.Printf("\n\u2714 Monitor detenido.\n")
+	// Eliminar el archivo de log al finalizar
+	cleanupLogFile(logPath)
+	cleanupLogFile(jsonPath)
+	// Renombrar el archivo de log
+	err = os.Rename("firma.txt", filepath.Join(storageDir, "netlog_final.txt"))
+	if err != nil {
+		fmt.Println("❌ Error al renombrar el archivo de log:", err)
+	} else {
+		fmt.Printf("Archivo de log renombrado a: %s\n", filepath.Join(storageDir, "netlog_final.txt"))
+	}
+	cleanupLogFile("firma.txt")
 }
 
 // Eliminar el archivo de log al finalizar
