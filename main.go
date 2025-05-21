@@ -106,6 +106,9 @@ func monitorConnections(iaIPSet map[string]string, logPath, jsonPath string, int
 				continue
 			}
 			for _, conn := range conns {
+				if conn.Status != "ESTABLISHED" {
+					continue
+				}
 				rIP := conn.Raddr.IP
 				if rIP == "" {
 					continue
@@ -119,6 +122,7 @@ func monitorConnections(iaIPSet map[string]string, logPath, jsonPath string, int
 					logMessage(logPath, jsonPath, mgs)
 					continue
 				}
+
 				if domain, ok := iaIPSet[rIP]; ok {
 					msg := fmt.Sprintf("\u26a0\ufe0f Conexi\u00f3n a IP monitoreada detectada! PID:%d %s:%d -> %s:%d (%s)[%s]",
 						conn.Pid, conn.Laddr.IP, conn.Laddr.Port, conn.Raddr.IP, conn.Raddr.Port, conn.Status, domain)
