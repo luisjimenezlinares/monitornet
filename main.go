@@ -32,8 +32,8 @@ var (
 	blacklist = map[string]bool{}
 )
 
-func resolveIADomainIPs(domains []string) map[string]bool {
-	ipMap := make(map[string]bool)
+func resolveIADomainIPs(domains []string) map[string]string {
+	ipMap := make(map[string]string)
 	for _, domain := range domains {
 		ips, err := net.LookupIP(domain)
 		if err != nil {
@@ -41,7 +41,7 @@ func resolveIADomainIPs(domains []string) map[string]bool {
 			continue
 		}
 		for _, ip := range ips {
-			ipMap[ip.String()] = true
+			ipMap[ip.String()] = domain
 		}
 	}
 	return ipMap
@@ -83,7 +83,7 @@ func calculateMD5(filePath string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func monitorConnections(iaIPSet map[string]bool, logPath, jsonPath string, interval time.Duration, done chan struct{}) {
+func monitorConnections(iaIPSet map[string]string, logPath, jsonPath string, interval time.Duration, done chan struct{}) {
 	for {
 		select {
 		case <-done:
@@ -103,9 +103,15 @@ func monitorConnections(iaIPSet map[string]bool, logPath, jsonPath string, inter
 				if whitelist[rIP] {
 					continue
 				}
-				if blacklist[rIP] || iaIPSet[rIP] {
-					msg := fmt.Sprintf("\u26a0\ufe0f Conexi\u00f3n a IP monitoreada detectada! PID:%d %s:%d -> %s:%d (%s)",
+				if blacklist[rIP] {
+					mgs := fmt.Sprintf("\u26a0\ufe0f Conexi\u00f3n a IP bloqueada detectada! PID:%d %s:%d -> %s:%d (%s)",
 						conn.Pid, conn.Laddr.IP, conn.Laddr.Port, conn.Raddr.IP, conn.Raddr.Port, conn.Status)
+					logMessage(logPath, jsonPath, mgs)
+					continue
+				}
+				if domain, ok := iaIPSet[rIP]; ok {
+					msg := fmt.Sprintf("\u26a0\ufe0f Conexi\u00f3n a IP monitoreada detectada! PID:%d %s:%d -> %s:%d (%s)[%s]",
+						conn.Pid, conn.Laddr.IP, conn.Laddr.Port, conn.Raddr.IP, conn.Raddr.Port, conn.Status, domain)
 					logMessage(logPath, jsonPath, msg)
 				}
 			}
@@ -146,4 +152,14 @@ func main() {
 	hash := calculateMD5(logPath)
 	logMessage(logPath, jsonPath, fmt.Sprintf("Monitor detenido. MD5 del log: %s", hash))
 	fmt.Printf("\n\u2714 Monitor detenido. MD5 del log: %s\n", hash)
+}
+
+// Eliminar el archivo de log al finalizar
+func cleanupLogFile(logPath string) {
+	err := os.Remove(logPath)
+	if err != nil {
+		log.Printf("Error al eliminar el archivo de log: %v", err)
+	} else {
+		fmt.Printf("Archivo de log eliminado: %s\n", logPath)
+	}
 }
