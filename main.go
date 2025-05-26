@@ -107,22 +107,46 @@ func writeConnectionLog(path string, ialist map[string]string) {
 		// - Privada si son IPs privadas
 		// - Pública si son IPs públicas
 		var etiqueta string
+		var dm string
 
-		if domain, ok := ialist[laddrIP]; ok {
-			etiqueta = fmt.Sprintf("Dominio: %s", domain)
-		} else if _, ok := blacklist[laddrIP]; ok {
-			etiqueta = "Blacklist"
-		} else if isPrivateIP(laddrIP) {
-			etiqueta = "Privada"
-		} else {
-			etiqueta = "Pública"
+		// Si la IPs no tiene el formato de una dirección IP válida, la ignoramos
+		if net.ParseIP(laddrIP) == nil || net.ParseIP(raddrIP) == nil {
+			return true // skip invalid IPs
 		}
-		line := fmt.Sprintf("[%s]\tPID: %s, LADDR: %s:%s, RADDR: %s:%s, VECES VISTA: %d\n", etiqueta, pid, laddrIP, laddrPort, raddrIP, raddrPort, count)
+
+		if domain, ok := ialist[raddrIP]; ok {
+			etiqueta = "IA"
+			dm = domain
+
+		} else if _, ok := blacklist[raddrIP]; ok {
+			etiqueta = "BL"
+		} else if isPrivateIP(raddrIP) {
+			etiqueta = "PV"
+		} else {
+			// Buscamos DNS inverso para IPs públicas
+			// Si no hay DNS inverso, lo dejamos como Pública
+			names, err := net.LookupAddr(raddrIP)
+			if err != nil || len(names) == 0 {
+				return false
+			}
+			for _, name := range names {
+				if strings.Contains(name, "1e100.net") {
+					etiqueta = "GO"
+				}
+			}
+			if etiqueta == "" {
+				etiqueta = "PB"
+			}
+		}
+		line := fmt.Sprintf("[%s]\tPID:%s\t%s:%s\t%s:%s\t(%d)[%s]\n", etiqueta, pid, laddrIP, laddrPort, raddrIP, raddrPort, count, dm)
 		f.WriteString(line)
 		return true
 	})
 }
 
+// Monitoriza las conexiones de red y actualiza el contador de conexiones
+// Utiliza un ticker para reducir la frecuencia de las comprobaciones
+// y evitar sobrecargar el sistema
 func monitorConnections(done chan struct{}) {
 	ticker := time.NewTicker(time.Duration(intervalMs) * time.Millisecond)
 	defer ticker.Stop()
