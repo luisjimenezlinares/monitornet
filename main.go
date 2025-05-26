@@ -23,7 +23,7 @@ import (
 
 const (
 	clave       = "clave_super_secreta"
-	WaitSeconds = 
+	WaitSeconds = 10
 	// IntervalSeconds = 10
 	blacklistFile = "https://raw.githubusercontent.com/luisjimenezlinares/blacklist/refs/heads/main/ia_monitor_domains.txt"
 )
@@ -173,7 +173,6 @@ func firmarFicheroConHMAC(ficheroEntrada, ficheroSalida string, clavestr string)
 	return nil
 }
 
-
 func main() {
 	if len(os.Args) < 2 {
 		log.Fatal("Debe proporcionarse la ruta del log como argumento.")
@@ -223,6 +222,31 @@ func main() {
 		fmt.Printf("Archivo de log renombrado a: %s\n", filepath.Join(storageDir, "netlog_final.txt"))
 	}
 	cleanupLogFile("firma.txt")
+}
+
+// isPrivateIP checks if the given IP string is a private IP address.
+func isPrivateIP(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	privateBlocks := []string{
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"127.0.0.0/8",
+		"169.254.0.0/16",
+		"::1/128",
+		"fc00::/7",
+		"fe80::/10",
+	}
+	for _, block := range privateBlocks {
+		_, cidr, _ := net.ParseCIDR(block)
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // Eliminar el archivo de log al finalizar
