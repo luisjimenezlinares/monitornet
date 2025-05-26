@@ -92,7 +92,56 @@ func logMessage(path string, jsonPath string, msg string) {
 	}
 }
 
-func monitorConnections(getIaIPSet func() map[string]string, logPath, jsonPath string, done chan struct{}) {
+// Escribe en el fichero de log
+// El contenido de connCounter, que contiene las conexiones únicas y las veces que se han visto
+func writeConnectionLog(path string, ialist map[string]string) {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("Error abriendo el fichero de log: %v", err)
+		return
+	}
+	defer f.Close()
+
+	connCounter.Range(func(key, value interface{}) bool {
+		keyStr, ok := key.(string)
+		if !ok {
+			return true // skip if not string
+		}
+		count, ok := value.(int)
+		if !ok {
+			return true // skip if not int
+		}
+		parts := strings.Split(keyStr, "-")
+		if len(parts) < 5 {
+			return true // Formato inesperado
+		}
+		pid := parts[0]
+		laddrIP := parts[1]
+		laddrPort := parts[2]
+		raddrIP := parts[3]
+		raddrPort := parts[4]
+		// Etiquetamos las IPs como:
+		// - el dominio	 si están en la lista de Blacklist utilizando IaIPs
+		// - Privada si son IPs privadas
+		// - Pública si son IPs públicas
+		var etiqueta string
+
+		if domain, ok := ialist[laddrIP]; ok {
+			etiqueta = fmt.Sprintf("Dominio: %s", domain)
+		} else if _, ok := blacklist[laddrIP]; ok {
+			etiqueta = "Blacklist"
+		} else if isPrivateIP(laddrIP) {
+			etiqueta = "Privada"
+		} else {
+			etiqueta = "Pública"
+		}
+		line := fmt.Sprintf("[%s]\tPID: %s, LADDR: %s:%s, RADDR: %s:%s, VECES VISTA: %d\n", etiqueta, pid, laddrIP, laddrPort, raddrIP, raddrPort, count)
+		f.WriteString(line)
+		return true
+	})
+}
+
+func monitorConnections(done chan struct{}) {
 	ticker := time.NewTicker(time.Duration(intervalMs) * time.Millisecond)
 	defer ticker.Stop()
 
@@ -103,45 +152,21 @@ func monitorConnections(getIaIPSet func() map[string]string, logPath, jsonPath s
 		case <-ticker.C:
 			conns, err := psnet.Connections("all")
 			if err != nil {
-				logMessage(logPath, jsonPath, fmt.Sprintf("Error obteniendo conexiones: %v", err))
+				fmt.Println(fmt.Sprintf("Error obteniendo conexiones: %v", err))
 				continue
 			}
-			iaIPSet := getIaIPSet()
 			for _, conn := range conns {
 				key := fmt.Sprintf("%d-%s-%d-%s-%d", conn.Pid, conn.Laddr.IP, conn.Laddr.Port, conn.Raddr.IP, conn.Raddr.Port)
-				if _, seen := seenConns.LoadOrStore(key, true); seen || conn.Raddr.IP == "" {
-					continue
+				// Si ya hemos visto esta conexión, aumentamsos el contador
+				if count, ok := connCounter.Load(key); ok {
+					connCounter.Store(key, count.(int)+1)
+					continue // No volvemos a procesar esta conexión
 				}
-				rip := conn.Raddr.IP
-				if whitelist[rip] {
-					continue
-				}
-				if blacklist[rip] {
-					msg := fmt.Sprintf("\u26a0\ufe0f Conexión a IP bloqueada detectada! PID:%d %s:%d -> %s:%d (%s)", conn.Pid, conn.Laddr.IP, conn.Laddr.Port, rip, conn.Raddr.Port, conn.Status)
-					logMessage(logPath, jsonPath, msg)
-					continue
-				}
-				if domain, ok := iaIPSet[rip]; ok {
-					msg := fmt.Sprintf("\u26a0\ufe0f Conexión a IP monitoreada detectada! PID:%d %s:%d -> %s:%d (%s)[%s]", conn.Pid, conn.Laddr.IP, conn.Laddr.Port, rip, conn.Raddr.Port, conn.Status, domain)
-					logMessage(logPath, jsonPath, msg)
-				} else if !isPrivateIP(rip) {
-					msg := fmt.Sprintf("🔵 Conexión a IP pública: PID:%d %s:%d -> %s:%d (%s)", conn.Pid, conn.Laddr.IP, conn.Laddr.Port, rip, conn.Raddr.Port, conn.Status)
-					logMessage(logPath, jsonPath, msg)
-				}
+				// Si no, la añadimos al contador
+				connCounter.Store(key, 1)
+
 			}
 		}
-	}
-}
-
-func periodicIPRefresh(domains []string, mutex *sync.RWMutex, sharedMap *map[string]string, logPath, jsonPath string) {
-	ticker := time.NewTicker(time.Duration(refreshMin) * time.Minute)
-	defer ticker.Stop()
-	for range ticker.C {
-		newIPs := resolveIADomainIPs(domains)
-		mutex.Lock()
-		*sharedMap = newIPs
-		mutex.Unlock()
-		logMessage(logPath, jsonPath, fmt.Sprintf("🔄 Refrescadas %d IPs monitoreadas.", len(newIPs)))
 	}
 }
 
@@ -192,40 +217,26 @@ func main() {
 	}
 	os.MkdirAll(storageDir, 0755)
 	logPath := filepath.Join(storageDir, "netlog.txt")
-	jsonPath := filepath.Join(storageDir, "netlog.json")
 
-	logMessage(logPath, jsonPath, "🚀 Monitor iniciado")
 	domains, err := fetchDomainsFromGitHub(blacklistFile)
 	if err != nil {
 		log.Fatalf("No se pudieron obtener los dominios: %v", err)
 	}
 
 	var iaIPs = resolveIADomainIPs(domains)
-	var mutex sync.RWMutex
-	go periodicIPRefresh(domains, &mutex, &iaIPs, logPath, jsonPath)
 
-	getIaIPSet := func() map[string]string {
-		mutex.RLock()
-		defer mutex.RUnlock()
-		copy := make(map[string]string)
-		for k, v := range iaIPs {
-			copy[k] = v
-		}
-		return copy
-	}
 	done := make(chan struct{})
-	go monitorConnections(getIaIPSet, logPath, jsonPath, done)
+	go monitorConnections(done)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	<-c
 	close(done)
-
+	writeConnectionLog(logPath, iaIPs)
 	err = firmarFicheroConHMAC(logPath, "firma.txt", clave)
 	if err == nil {
 		os.Rename("firma.txt", filepath.Join(storageDir, "netlog_final.txt"))
 	}
 	cleanupLogFile(logPath)
-	cleanupLogFile(jsonPath)
 	fmt.Println("✅ Monitor detenido y archivo firmado")
 }
