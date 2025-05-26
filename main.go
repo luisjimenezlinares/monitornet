@@ -23,13 +23,13 @@ import (
 
 const (
 	clave       = "clave_super_secreta"
-	WaitSeconds = 10
+	WaitSeconds = 1
 	// IntervalSeconds = 10
 	blacklistFile = "https://raw.githubusercontent.com/luisjimenezlinares/blacklist/refs/heads/main/ia_monitor_domains.txt"
 )
 
 var (
-	iaDomains = []string{}
+	//iaDomains = []string{}
 	whitelist = map[string]bool{}
 	blacklist = map[string]bool{}
 )
@@ -174,10 +174,21 @@ func firmarFicheroConHMAC(ficheroEntrada, ficheroSalida string, clavestr string)
 }
 
 func main() {
+	var storageDir string
 	if len(os.Args) < 2 {
-		log.Fatal("Debe proporcionarse la ruta del log como argumento.")
+		storageDir = "."
+
+	} else if len(os.Args) > 2 {
+		fmt.Println("Uso: go run main.go [directorio_de_almacenamiento]")
+		fmt.Println("Si no se especifica un directorio, se usará el directorio actual.")
+		return
+	} else {
+		storageDir = os.Args[1]
 	}
-	storageDir := os.Args[1]
+
+	if storageDir == "" {
+		storageDir = "."
+	}
 	os.MkdirAll(storageDir, 0755)
 
 	logPath := filepath.Join(storageDir, "netlog.txt")
@@ -221,7 +232,7 @@ func main() {
 	} else {
 		fmt.Printf("Archivo de log renombrado a: %s\n", filepath.Join(storageDir, "netlog_final.txt"))
 	}
-	cleanupLogFile("firma.txt")
+
 }
 
 // isPrivateIP checks if the given IP string is a private IP address.
