@@ -23,7 +23,7 @@ import (
 
 const (
 	clave       = "clave_super_secreta"
-	WaitSeconds = 10
+	WaitSeconds = 
 	// IntervalSeconds = 10
 	blacklistFile = "https://raw.githubusercontent.com/luisjimenezlinares/blacklist/refs/heads/main/ia_monitor_domains.txt"
 )
@@ -106,9 +106,6 @@ func monitorConnections(iaIPSet map[string]string, logPath, jsonPath string, int
 				continue
 			}
 			for _, conn := range conns {
-				if conn.Status != "ESTABLISHED" {
-					continue
-				}
 				rIP := conn.Raddr.IP
 				if rIP == "" {
 					continue
@@ -126,6 +123,13 @@ func monitorConnections(iaIPSet map[string]string, logPath, jsonPath string, int
 				if domain, ok := iaIPSet[rIP]; ok {
 					msg := fmt.Sprintf("\u26a0\ufe0f Conexi\u00f3n a IP monitoreada detectada! PID:%d %s:%d -> %s:%d (%s)[%s]",
 						conn.Pid, conn.Laddr.IP, conn.Laddr.Port, conn.Raddr.IP, conn.Raddr.Port, conn.Status, domain)
+					logMessage(logPath, jsonPath, msg)
+					continue
+				}
+				// Si la IP no está en la lista de IA, pero es una IP pública, se registra como conexión normal
+				if rIP != "" && !isPrivateIP(rIP) {
+					msg := fmt.Sprintf("🔵 Conexión a IP pública detectada! PID:%d %s:%d -> %s:%d (%s)",
+						conn.Pid, conn.Laddr.IP, conn.Laddr.Port, conn.Raddr.IP, conn.Raddr.Port, conn.Status)
 					logMessage(logPath, jsonPath, msg)
 				}
 			}
@@ -168,6 +172,7 @@ func firmarFicheroConHMAC(ficheroEntrada, ficheroSalida string, clavestr string)
 
 	return nil
 }
+
 
 func main() {
 	if len(os.Args) < 2 {
