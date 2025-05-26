@@ -6,7 +6,6 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -73,23 +72,6 @@ func resolveIADomainIPs(domains []string) map[string]string {
 		}
 	}
 	return ipMap
-}
-
-func logMessage(path string, jsonPath string, msg string) {
-	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	logLine := fmt.Sprintf("[%s] %s\n", timestamp, msg)
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err == nil {
-		defer f.Close()
-		f.WriteString(logLine)
-	}
-	entry := LogEntry{Timestamp: timestamp, Message: msg}
-	jsonData, _ := json.Marshal(entry)
-	jf, err := os.OpenFile(jsonPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err == nil {
-		defer jf.Close()
-		jf.WriteString(string(jsonData) + "\n")
-	}
 }
 
 // Escribe en el fichero de log
